@@ -1,16 +1,23 @@
 [project]
 name = "ledger"
 version = "0.1.0"
-description = "Add your description here"
+description = "A money-correct double-entry ledger with an independent invariant checker"
 readme = "README.md"
 authors = [
     { name = "Truman Chan", email = "97918794+tmanzhe@users.noreply.github.com" }
 ]
 requires-python = ">=3.12"
-dependencies = []
+dependencies = ["psycopg[binary]>=3.2,<4"]
+
+[dependency-groups]
+dev = ["pytest>=8,<10"]
 
 [project.scripts]
-ledger = "ledger:main"
+ledger = "ledger.cli:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
 
 [build-system]
 requires = ["uv_build>=0.13.6,<0.14.0"]

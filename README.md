@@ -10,8 +10,20 @@ Install with Python 3.12+ and uv:
 uv sync --group dev
 ```
 
-Pass a connection string explicitly. These examples use a local, disposable
-Postgres database called `ledger_demo` over a Unix socket:
+For a local demo, put Postgres binaries (`initdb` and `pg_ctl`) on `PATH`.
+Run as a non-root user. Start a disposable cluster and create `ledger_demo`:
+
+```sh
+mkdir -m 700 /tmp/ledger-socket
+initdb -D /tmp/ledger-pgdata -A trust --no-locale -E UTF8
+pg_ctl -D /tmp/ledger-pgdata -l /tmp/ledger-pg.log -o "-h '' -k /tmp/ledger-socket" -w start
+uv run python -c "import psycopg; c = psycopg.connect('host=/tmp/ledger-socket dbname=postgres', autocommit=True); c.execute('CREATE DATABASE ledger_demo'); c.close()"
+```
+
+Use fresh paths for each demo. This cluster trusts local socket connections and
+does not listen on TCP. No API keys or external services are needed.
+
+Pass the connection string explicitly:
 
 ```sh
 uv run ledger --dsn 'host=/tmp/ledger-socket dbname=ledger_demo' init
@@ -98,6 +110,12 @@ One local Linux container run, Python 3.12.16 and Postgres 16.2 with fsync on:
 took 1.345 s: **743.36 requests/s**, **p50 19.038 ms**, **p99 58.525 ms**.
 Zero failures; all checks passed. Including funding, the audit found 508 transfers,
 1,016 postings, and zero cent totals. These are local measurements.
+
+When done, stop the HTTP server with Ctrl-C, then stop the demo database:
+
+```sh
+pg_ctl -D /tmp/ledger-pgdata -m fast -w stop
+```
 
 Run the full behavior suite against a disposable local Postgres cluster:
 

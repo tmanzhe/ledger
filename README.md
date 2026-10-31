@@ -1,10 +1,8 @@
 # ledger
 
-A money-correct double-entry ledger service on Postgres: amounts are integer cents, every write is idempotent, and accounts never overdraft even under heavy concurrent transfers.
-
-The current implementation provides a Python library and command. See
-[the milestone plan](plan/README.md) for scope and implementation status.
-It has no external API integrations and does not load environment files.
+A small double-entry ledger on Postgres, with a Python library, CLI, and local
+HTTP API. Money is integer cents. Transfers are atomic and idempotent, and
+normal accounts cannot overdraft.
 
 Install with Python 3.12+ and uv:
 
@@ -61,6 +59,46 @@ snapshot using the immutable values in `ledger.models`. Neither checker repairs
 data. Database constraints reinforce the writer, while the checker independently
 detects corrupt records inserted after constraints were bypassed.
 
+Start the stdlib HTTP server after `init`:
+
+```sh
+uv run ledger --dsn 'host=/tmp/ledger-socket dbname=ledger_demo' serve --port 8000
+```
+
+It binds to `127.0.0.1` by default. Requests and responses use JSON.
+
+| Route | Request |
+| --- | --- |
+| `POST /accounts` | `{"id":"alice","allow_negative":false}`; policy defaults to false |
+| `GET /accounts/{id}` | URL-encode the account ID; returns its balance and policy |
+| `POST /transfers` | `{"source_id":"alice","destination_id":"bob","amount_cents":100,"idempotency_key":"pay-1"}` |
+| `GET /check` | Returns the full invariant report |
+
+Writes and identical retries return `200`. Bad fields or JSON return `400`,
+missing accounts/routes `404`, wrong methods `405`, and rejected transfers or
+conflicting retries `409`. `/check` returns `409` when it finds violations.
+Bodies need `Content-Type: application/json` and `Content-Length`, with a 16 KiB
+limit (`413`); other content types get `415`. Database failures return a generic
+`503` JSON error.
+
+Run the load script against a disposable database with no other writers:
+
+```sh
+uv run python scripts/load_test.py --url http://127.0.0.1:8000 --requests 1000 --workers 16 --accounts 8
+```
+
+It funds fresh accounts, races transfers and identical retries, then checks exact
+balances, posting counts, retry IDs, and invariants over HTTP. It prints JSON
+with requests/second and nearest-rank p50/p99 latency, and exits `1` on failure.
+Timing covers transfer requests, including retries, and excludes setup and audits.
+The accounts and transfers stay in the database.
+
+One local Linux container run, Python 3.12.16 and Postgres 16.2 with fsync on:
+1,000 requests, 16 workers, 8 funded accounts, 500 unique transfers and 500 retries
+took 1.345 s: **743.36 requests/s**, **p50 19.038 ms**, **p99 58.525 ms**.
+Zero failures; all checks passed. Including funding, the audit found 508 transfers,
+1,016 postings, and zero cent totals. These are local measurements.
+
 Run the full behavior suite against a disposable local Postgres cluster:
 
 ```sh
@@ -69,8 +107,7 @@ uv run pytest -q --postgres-bin=/path/to/postgres/bin
 
 The directory must contain `initdb` and `pg_ctl` (omit the flag if both are on
 `PATH`). Run as a non-root user, as required by `initdb`. Tests create and stop
-their own temporary cluster, listen only on a Unix socket, isolate each test in a
-fresh schema, and never connect to an existing database. They cover concurrent
-posting/retries, rollback, integer limits, corrupted data, snapshot isolation,
-and the command's actual process exit codes. No paid or real external API calls
-are needed. No tests existed in the initial skeleton.
+their own temporary cluster with a Unix socket and a fresh schema per test.
+HTTP tests use loopback sockets. They cover concurrent posting/retries, rollback,
+integer limits, bad HTTP requests, corrupted data, snapshot isolation, process
+exit codes, and the load script.

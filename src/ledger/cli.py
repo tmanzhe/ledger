@@ -25,10 +25,24 @@ def main(argv: list[str] | None = None) -> int:
     transfer.add_argument("amount_cents", type=int)
     transfer.add_argument("--key", required=True)
     commands.add_parser("check", help="audit a consistent, read-only snapshot")
+    serve = commands.add_parser("serve", help="serve the JSON HTTP API")
+    serve.add_argument("--host", default="127.0.0.1")
+    serve.add_argument("--port", type=int, default=8000)
     args = parser.parse_args(argv)
 
     try:
         ledger = Ledger(args.dsn)
+        if args.command == "serve":
+            from ledger.http import LedgerHTTPServer
+
+            with LedgerHTTPServer((args.host, args.port), args.dsn) as server:
+                print(json.dumps({"host": server.server_address[0],
+                                  "port": server.server_address[1]}), flush=True)
+                try:
+                    server.serve_forever()
+                except KeyboardInterrupt:
+                    pass
+            return 0
         if args.command == "check":
             report = check_invariants(args.dsn)
             print(json.dumps(report.to_dict(), sort_keys=True))
